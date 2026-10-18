@@ -1,4 +1,4 @@
-# HA Dashboard Cards
+# iamwillbar's Dashboard Cards
 
 Custom cards for Home Assistant dashboards. You install them once through HACS, and each card is used by its own `type:`.
 
@@ -12,7 +12,7 @@ Custom cards for Home Assistant dashboards. You install them once through HACS, 
 
 1. HACS → ⋮ → **Custom repositories**.
 2. Add `https://github.com/iamwillbar/ha-dashboard` with category **Dashboard**.
-3. Find **HA Dashboard Cards** and click **Download**. HACS registers `ha-dashboard.js`, which loads every card.
+3. Find **iamwillbar's Dashboard Cards** and click **Download**. HACS registers `ha-dashboard.js`, which loads every card.
 4. Reload the browser, then add a card by its type, e.g. `type: custom:pourover-card`.
 
 ## Layout
