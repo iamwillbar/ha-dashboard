@@ -25,7 +25,13 @@ A Home Assistant dashboard card that walks you through a pourover brew, one pour
 
 ## Configure
 
-The minimal config, guided by time only:
+The card has a visual editor: **Add card → Pourover Card**. When you add the card, it looks for a scale: a sensor that reports `g` (sensors with `device_class: weight` come first), plus its matching `_tare` button. If it finds one, the card starts out in scale mode. In the editor, you can edit, add, and remove pours. **Reset to Blue Bottle** restores the default recipe. If the recipe matches the default, the editor writes no `pours:` key.
+
+![Visual editor](editor.png)
+
+*Screenshot from the dev harness, which uses a stand-in for HA's form fields. In HA, the entity fields are real entity pickers.*
+
+You can also configure the card in YAML. The minimal config, guided by time only:
 
 ```yaml
 type: custom:pourover-card
@@ -59,3 +65,5 @@ tare_entity: button.lunar_tare
 ## Develop
 
 The harness is `dev/pourover-card.html`. Query params: `scale=1`, `weight=118`, `t=52`, `status=running|paused|armed|done`, `theme=dark`, `shots=1` (freezes the clock).
+
+The editor harness is `dev/pourover-card-editor.html`. It shows the editor next to a live preview and the emitted config. Add `scale=1` to start from the auto-detected stub config.

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pourover Editor Harness</title>
+<style>
+  :root { --primary-text-color:#212121; --secondary-text-color:#727272; --card-background-color:#fff; --divider-color:#ddd; --primary-color:#03a9f4; --page:#f2efe9; }
+  :root[data-theme="dark"] { --primary-text-color:#e1e1e1; --secondary-text-color:#9b9b9b; --card-background-color:#1c1c1c; --divider-color:#333; --page:#111; }
+  body { margin:0; padding:24px 16px; background:var(--page); color:var(--primary-text-color); font-family:Roboto, system-ui, sans-serif; }
+  .wrap { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:24px; max-width:900px; margin:0 auto; }
+  .panel { background:var(--card-background-color); border-radius:16px; padding:16px; }
+  pre { font-size:12px; white-space:pre-wrap; margin:16px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel"><pourover-card-editor id="editor"></pourover-card-editor></div>
+  <div>
+    <pourover-card id="card"></pourover-card>
+    <pre id="out"></pre>
+  </div>
+</div>
+<script type="module">
+  // HA's ha-form doesn't exist outside HA; this stub renders plain inputs from the schema.
+  if (!customElements.get("ha-form")) {
+    customElements.define("ha-form", class extends HTMLElement {
+      set data(v) { this._data = v; this._sync(); }
+      set schema(v) { this._schema = v; this._render(); }
+      _fields() { return this._schema.flatMap((s) => s.schema ?? [s]); }
+      _render() {
+        this.innerHTML = "";
+        for (const s of this._fields()) {
+          const label = document.createElement("label");
+          label.style.cssText = "display:flex;justify-content:space-between;gap:8px;margin:6px 0;font-size:14px";
+          label.textContent = this.computeLabel?.(s) ?? s.name;
+          const input = document.createElement("input");
+          input.name = s.name;
+          input.type = s.selector.boolean ? "checkbox" : s.selector.number ? "number" : "text";
+          input.addEventListener("input", () => {
+            const v = input.type === "checkbox" ? input.checked
+              : input.type === "number" ? (input.value === "" ? undefined : Number(input.value))
+              : input.value;
+            const value = { ...this._data, [s.name]: v };
+            if (v === undefined) delete value[s.name];
+            this._data = value;
+            this.dispatchEvent(new CustomEvent("value-changed", { detail: { value } }));
+          });
+          label.append(input);
+          this.append(label);
+        }
+        this._sync();
+      }
+      _sync() {
+        if (!this._schema || !this._data) return;
+        for (const input of this.querySelectorAll("input")) {
+          if (input === document.activeElement) continue;
+          const v = this._data[input.name];
+          if (input.type === "checkbox") input.checked = !!v;
+          else input.value = v ?? "";
+        }
+      }
+    });
+  }
+
+  await import("../dist/ha-dashboard.js");
+  await customElements.whenDefined("pourover-card");
+  const q = new URLSearchParams(location.search);
+  if (q.get("theme") === "dark") document.documentElement.dataset.theme = "dark";
+
+  const states = {
+    "sensor.lunar_weight": { state: "0", attributes: { unit_of_measurement: "g", device_class: "weight" } },
+    "button.lunar_tare": { state: "unknown", attributes: {} },
+  };
+  const hass = { states, callService: () => {} };
+  const Card = customElements.get("pourover-card");
+  const editor = document.getElementById("editor");
+  const card = document.getElementById("card");
+  const out = document.getElementById("out");
+
+  const show = (config) => {
+    card.setConfig(config);
+    card.hass = hass;
+    out.textContent = JSON.stringify(config, null, 2);
+  };
+  const config = { type: "custom:pourover-card", ...(q.get("scale") === "1" ? Card.getStubConfig(hass) : {}) };
+  editor.hass = hass;
+  editor.setConfig(config);
+  show(config);
+  editor.addEventListener("config-changed", (ev) => {
+    show(ev.detail.config);
+    editor.setConfig(ev.detail.config); // what HA does: echo the config back
+  });
+</script>
+</body>
+</html>

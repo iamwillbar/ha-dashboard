@@ -2,11 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_POURS as pours,
+  cleanConfig,
   computePhase,
   defaultDrawdownAt,
+  findScale,
   formatTime,
+  parseTime,
   shouldAutoStart,
   spiralPath,
+  validatePours,
 } from "../dist/pourover-card.js";
 
 const at = (elapsed, weight = null, status = "running") =>
@@ -99,4 +103,63 @@ test("spiralPath starts at the centre", () => {
   const d = spiralPath(3);
   assert.match(d, /^M50\.00 50\.00/);
   assert.equal((d.match(/L/g) || []).length, 108);
+});
+
+test("parseTime takes m:ss or seconds", () => {
+  assert.equal(parseTime("1:10"), 70);
+  assert.equal(parseTime("0:00"), 0);
+  assert.equal(parseTime("70"), 70);
+  assert.equal(parseTime(" 40 "), 40);
+  assert.ok(Number.isNaN(parseTime("")));
+  assert.ok(Number.isNaN(parseTime("1:75")));
+  assert.ok(Number.isNaN(parseTime("abc")));
+});
+
+test("validatePours accepts the default recipe", () => {
+  assert.deepEqual(validatePours(pours), []);
+});
+
+test("validatePours flags order, blanks and laps", () => {
+  assert.deepEqual(validatePours([]), ["Add at least one pour"]);
+  const swapped = [pours[0], { ...pours[1], start: 0 }];
+  assert.deepEqual(validatePours(swapped), ["Pour 2 must start after pour 1"]);
+  const lighter = [pours[0], { ...pours[1], target: 40 }];
+  assert.deepEqual(validatePours(lighter), ["Pour 2 must finish heavier than pour 1"]);
+  assert.match(validatePours([{ ...pours[0], start: NaN }])[0], /start/);
+  assert.match(validatePours([{ ...pours[0], laps_in: 0 }])[0], /laps/);
+});
+
+test("cleanConfig drops defaults and blanks, keeps edits", () => {
+  assert.deepEqual(
+    cleanConfig({
+      type: "custom:pourover-card",
+      title: "Pourover",
+      chime: true,
+      tolerance: 1,
+      start_threshold: 2,
+      weight_entity: "",
+      drawdown_at: undefined,
+      pours: pours.map((p) => ({ ...p })),
+    }),
+    { type: "custom:pourover-card" },
+  );
+  const edited = pours.map((p, i) => (i === 1 ? { ...p, target: 160 } : p));
+  assert.deepEqual(cleanConfig({ type: "x", chime: false, pours: edited }), {
+    type: "x",
+    chime: false,
+    pours: edited,
+  });
+});
+
+test("findScale picks a gram sensor and its tare button", () => {
+  const g = (extra = {}) => ({ state: "0", attributes: { unit_of_measurement: "g", ...extra } });
+  assert.deepEqual(findScale({}), {});
+  assert.deepEqual(findScale({ "sensor.temp": { attributes: { unit_of_measurement: "°C" } } }), {});
+  assert.deepEqual(
+    findScale({ "sensor.lunar_weight": g(), "button.lunar_tare": {} }),
+    { weight_entity: "sensor.lunar_weight", tare_entity: "button.lunar_tare" },
+  );
+  assert.deepEqual(findScale({ "sensor.flour": g(), "sensor.lunar_weight": g({ device_class: "weight" }) }), {
+    weight_entity: "sensor.lunar_weight",
+  });
 });

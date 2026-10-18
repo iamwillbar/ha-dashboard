@@ -7,7 +7,7 @@
  * core `acaia` integration) and can press its tare button.
  */
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 
 export const DEFAULT_POURS = [
   { start: 0, target: 50, laps_out: 3, laps_in: 3 },
@@ -118,6 +118,62 @@ export function spiralPath(turns, r = 40, cx = 50, cy = 50) {
     d += `${k ? "L" : "M"}${x.toFixed(2)} ${y.toFixed(2)}`;
   }
   return d;
+}
+
+/** "1:10" or "70" → 70 seconds; anything else → NaN. */
+export function parseTime(text) {
+  const s = String(text ?? "").trim();
+  const m = /^(\d+):([0-5]?\d)$/.exec(s);
+  if (m) return Number(m[1]) * 60 + Number(m[2]);
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+}
+
+/** Problems that would stop the recipe working, as messages for the editor. */
+export function validatePours(pours) {
+  if (!Array.isArray(pours) || pours.length === 0) return ["Add at least one pour"];
+  const errors = [];
+  pours.forEach((p, i) => {
+    const n = i + 1;
+    if (!Number.isFinite(p.start) || p.start < 0) errors.push(`Pour ${n}: start must be a time like 0:40`);
+    if (!Number.isFinite(p.target) || p.target <= 0) errors.push(`Pour ${n}: target must be grams above 0`);
+    if (!(p.laps_out >= 1) || !(p.laps_in >= 1)) errors.push(`Pour ${n}: laps must be at least 1`);
+    const prev = pours[i - 1];
+    if (!prev) return;
+    if (p.start <= prev.start) errors.push(`Pour ${n} must start after pour ${i}`);
+    if (p.target <= prev.target) errors.push(`Pour ${n} must finish heavier than pour ${i}`);
+  });
+  return errors;
+}
+
+const DEFAULTS = { title: "Pourover", start_threshold: 2, tolerance: 1, chime: true };
+
+const samePours = (a, b) =>
+  a.length === b.length &&
+  a.every((p, i) => ["start", "target", "laps_out", "laps_in"].every((k) => p[k] === b[i][k]));
+
+/** The smallest config that means the same thing: no defaults, no blanks. */
+export function cleanConfig(config) {
+  const out = {};
+  for (const [k, v] of Object.entries(config)) {
+    if (v === undefined || v === null || v === "") continue;
+    if (k in DEFAULTS && v === DEFAULTS[k]) continue;
+    if (k === "pours" && Array.isArray(v) && samePours(v, DEFAULT_POURS)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Find a scale in `hass.states`: a gram sensor, plus its `_tare` button if there is one. */
+export function findScale(states) {
+  const grams = Object.keys(states).filter(
+    (id) => id.startsWith("sensor.") && states[id]?.attributes?.unit_of_measurement === "g",
+  );
+  const weight =
+    grams.find((id) => states[id].attributes.device_class === "weight") ?? grams[0];
+  if (!weight) return {};
+  const prefix = weight.slice("sensor.".length).replace(/_weight$/, "");
+  const tare = `button.${prefix}_tare`;
+  return states[tare] ? { weight_entity: weight, tare_entity: tare } : { weight_entity: weight };
 }
 
 /* ------------------------------------------------------------------ */
@@ -251,8 +307,12 @@ class PouroverCard extends Base {
     this._now = () => Date.now();
   }
 
-  static getStubConfig() {
-    return {};
+  static getStubConfig(hass) {
+    return findScale(hass?.states ?? {});
+  }
+
+  static getConfigElement() {
+    return document.createElement("pourover-card-editor");
   }
 
   setConfig(config) {
@@ -653,8 +713,224 @@ class PouroverCard extends Base {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Editor                                                              */
+/* ------------------------------------------------------------------ */
+
+const grams = { min: 0, max: 50, step: 0.5, mode: "box", unit_of_measurement: "g" };
+
+const EDITOR_SCHEMA = [
+  { name: "title", selector: { text: {} } },
+  { name: "weight_entity", selector: { entity: { domain: "sensor" } } },
+  { name: "tare_entity", selector: { entity: { domain: "button" } } },
+  {
+    type: "grid",
+    name: "",
+    schema: [
+      { name: "start_threshold", selector: { number: grams } },
+      { name: "tolerance", selector: { number: grams } },
+    ],
+  },
+  { name: "chime", selector: { boolean: {} } },
+  { name: "drawdown_at", selector: { number: { min: 0, step: 1, mode: "box", unit_of_measurement: "s" } } },
+];
+
+const FORM_KEYS = ["title", "weight_entity", "tare_entity", "start_threshold", "tolerance", "chime", "drawdown_at"];
+
+const LABELS = {
+  title: "Title",
+  weight_entity: "Weight sensor",
+  tare_entity: "Tare button",
+  start_threshold: "Start threshold",
+  tolerance: "Tolerance",
+  chime: "Chime on pour cues",
+  drawdown_at: "Drawdown at",
+};
+
+const HELPERS = {
+  weight_entity: "Optional. Without a scale the card guides by time.",
+  start_threshold: "Weight that starts the clock once armed.",
+  tolerance: "Grams under target that still count as hit.",
+  drawdown_at: "Time-only mode: when the last pour ends. Leave blank for last start + last interval.",
+};
+
+const EDITOR_STYLE = `
+:host { display: block; }
+h3 { margin: 20px 0 8px; font-size: 16px; font-weight: 500; }
+.rows { display: grid; grid-template-columns: 20px repeat(4, minmax(0, 1fr)) 36px; gap: 6px 8px; align-items: center; }
+.rows .h { font-size: 12px; color: var(--secondary-text-color); }
+.rows .n { font-size: 14px; color: var(--secondary-text-color); text-align: center; }
+input {
+  box-sizing: border-box; width: 100%; height: 40px; padding: 0 10px;
+  font: inherit; font-size: 14px; color: var(--primary-text-color);
+  background: var(--input-fill-color, var(--secondary-background-color, transparent));
+  border: 1px solid var(--divider-color, #ccc); border-radius: 8px;
+}
+input:focus { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: -1px; }
+button {
+  font: inherit; font-size: 14px; cursor: pointer; color: var(--primary-color, #03a9f4);
+  background: transparent; border: 1px solid var(--divider-color, #ccc); border-radius: 999px;
+  min-height: 36px; padding: 0 14px;
+}
+button.remove { width: 36px; padding: 0; border: none; color: var(--secondary-text-color); font-size: 18px; }
+button:disabled { opacity: .35; cursor: default; }
+.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.errors { margin: 10px 0 0; padding: 0; list-style: none; color: var(--error-color, #db4437); font-size: 13px; }
+.errors li { margin: 2px 0; }
+`;
+
+const toRow = (p) => ({
+  start: formatTime(p.start),
+  target: String(p.target),
+  laps_out: String(p.laps_out ?? 5),
+  laps_in: String(p.laps_in ?? p.laps_out ?? 5),
+});
+
+const fromRow = (r) => ({
+  start: parseTime(r.start),
+  target: r.target === "" ? NaN : Number(r.target),
+  laps_out: r.laps_out === "" ? NaN : Number(r.laps_out),
+  laps_in: r.laps_in === "" ? NaN : Number(r.laps_in),
+});
+
+class PouroverCardEditor extends Base {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = {};
+    this._rows = [];
+    this._emitted = "";
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+  }
+
+  setConfig(config) {
+    this._config = config;
+    if (!this._form) this._build();
+    this._form.data = { ...DEFAULTS, ...config };
+    // Our own edits come back through setConfig; rebuilding then would steal focus.
+    if (JSON.stringify(config) === this._emitted) return;
+    this._formData = null;
+    this._rows = (config.pours ?? DEFAULT_POURS).map(toRow);
+    this._renderRows();
+    this._renderErrors(validatePours(this._rows.map(fromRow)));
+  }
+
+  _build() {
+    this.shadowRoot.innerHTML = `
+      <style>${EDITOR_STYLE}</style>
+      <ha-form></ha-form>
+      <h3>Pours</h3>
+      <div class="rows" id="rows"></div>
+      <div class="actions">
+        <button type="button" id="add">+ Add pour</button>
+        <button type="button" id="reset">Reset to Blue Bottle</button>
+      </div>
+      <ul class="errors" id="errors"></ul>
+    `;
+    const $ = (id) => this.shadowRoot.getElementById(id);
+    this._form = this.shadowRoot.querySelector("ha-form");
+    this._form.computeLabel = (s) => LABELS[s.name] ?? s.name;
+    this._form.computeHelper = (s) => HELPERS[s.name];
+    this._form.schema = EDITOR_SCHEMA;
+    if (this._hass) this._form.hass = this._hass;
+    this._form.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      this._formData = ev.detail.value;
+      this._emit();
+    });
+    this._rowsEl = $("rows");
+    this._errorsEl = $("errors");
+    this._rowsEl.addEventListener("input", (ev) => {
+      const { i, k } = ev.target.dataset;
+      if (i == null) return;
+      this._rows[i][k] = ev.target.value;
+      this._emit();
+    });
+    this._rowsEl.addEventListener("click", (ev) => {
+      const i = ev.target.closest("button.remove")?.dataset.i;
+      if (i == null) return;
+      this._rows.splice(Number(i), 1);
+      this._renderRows();
+      this._emit();
+    });
+    $("add").addEventListener("click", () => {
+      const last = fromRow(this._rows[this._rows.length - 1] ?? toRow({ start: -30, target: 0 }));
+      this._rows.push(toRow({
+        start: (Number.isFinite(last.start) ? last.start : 0) + 30,
+        target: (Number.isFinite(last.target) ? last.target : 0) + 100,
+        laps_out: 5,
+        laps_in: 5,
+      }));
+      this._renderRows();
+      this._emit();
+    });
+    $("reset").addEventListener("click", () => {
+      this._rows = DEFAULT_POURS.map(toRow);
+      this._renderRows();
+      this._emit();
+    });
+  }
+
+  _renderRows() {
+    const head = ["#", "Start", "Target (g)", "Laps out", "Laps in", ""]
+      .map((h) => `<div class="h">${h}</div>`)
+      .join("");
+    const field = (i, k, attrs) =>
+      `<input data-i="${i}" data-k="${k}" aria-label="Pour ${i + 1} ${k.replace("_", " ")}" ${attrs}>`;
+    const only = this._rows.length === 1;
+    this._rowsEl.innerHTML =
+      head +
+      this._rows
+        .map(
+          (_, i) => `
+        <div class="n">${i + 1}</div>
+        ${field(i, "start", 'inputmode="numeric" placeholder="0:40"')}
+        ${field(i, "target", 'type="number" min="1" step="1"')}
+        ${field(i, "laps_out", 'type="number" min="1" step="1"')}
+        ${field(i, "laps_in", 'type="number" min="1" step="1"')}
+        <button type="button" class="remove" data-i="${i}" aria-label="Remove pour ${i + 1}" ${only ? "disabled" : ""}>✕</button>`,
+        )
+        .join("");
+    this._rowsEl.querySelectorAll("input").forEach((input) => {
+      input.value = this._rows[input.dataset.i][input.dataset.k];
+    });
+  }
+
+  _renderErrors(errors) {
+    this._errorsEl.innerHTML = "";
+    for (const msg of errors) {
+      const li = document.createElement("li");
+      li.textContent = msg;
+      this._errorsEl.append(li);
+    }
+  }
+
+  _emit() {
+    const pours = this._rows.map(fromRow);
+    const errors = validatePours(pours);
+    this._renderErrors(errors);
+    if (errors.length) return;
+
+    const base = { ...this._config };
+    if (this._formData) {
+      for (const k of FORM_KEYS) delete base[k];
+      Object.assign(base, this._formData);
+    }
+    const config = cleanConfig({ ...base, pours });
+    this._emitted = JSON.stringify(config);
+    this.dispatchEvent(
+      new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }),
+    );
+  }
+}
+
 if (typeof customElements !== "undefined" && !customElements.get("pourover-card")) {
   customElements.define("pourover-card", PouroverCard);
+  customElements.define("pourover-card-editor", PouroverCardEditor);
   window.customCards = window.customCards || [];
   window.customCards.push({
     type: "pourover-card",
