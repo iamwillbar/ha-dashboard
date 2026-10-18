@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pourover Card Harness</title>
+<style>
+  :root { --primary-text-color:#212121; --secondary-text-color:#727272; --card-background-color:#fff; --page:#f2efe9; }
+  :root[data-theme="dark"] { --primary-text-color:#e1e1e1; --secondary-text-color:#9b9b9b; --card-background-color:#1c1c1c; --page:#111; }
+  body { margin:0; padding:24px 16px; background:var(--page); color:var(--primary-text-color); font-family:Roboto, system-ui, sans-serif; }
+  .wrap { max-width:420px; margin:0 auto; }
+  .controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:16px; font-size:14px; }
+  .controls[hidden] { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <pourover-card id="card"></pourover-card>
+  <div class="controls" id="controls">
+    <label>Weight <input id="w" type="range" min="0" max="380" value="0"> <span id="wv">0</span> g</label>
+  </div>
+</div>
+<script type="module">
+  import "../pourover-card.js";
+  // Query params: scale=1 weight=118 t=52 status=running|paused|armed|done theme=dark shots=1
+  const q = new URLSearchParams(location.search);
+  if (q.get("theme") === "dark") document.documentElement.dataset.theme = "dark";
+  const scale = q.get("scale") === "1";
+  const card = document.getElementById("card");
+  let weight = Number(q.get("weight") ?? 0);
+  const hass = () => ({
+    states: scale ? { "sensor.lunar_weight": { state: String(weight) } } : {},
+    callService: (d, s, data) => { console.log("callService", d, s, data); weight = 0; push(); },
+  });
+  const push = () => { card.hass = hass(); document.getElementById("wv").textContent = weight; };
+  card.setConfig(scale
+    ? { weight_entity: "sensor.lunar_weight", tare_entity: "button.lunar_tare" }
+    : {});
+  push();
+  const status = q.get("status");
+  if (q.get("shots") === "1") card._now = () => 1e12; // freeze the clock for screenshots
+  if (status) {
+    card._accum = Number(q.get("t") ?? 0) * 1000;
+    if (status === "running") card._run();
+    else card._status = status;
+    card._update();
+  }
+  const w = document.getElementById("w");
+  w.value = weight;
+  w.addEventListener("input", () => { weight = Number(w.value); push(); });
+  document.getElementById("controls").hidden = !scale || q.get("shots") === "1";
+</script>
+</body>
+</html>
