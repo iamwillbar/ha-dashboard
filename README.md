@@ -67,3 +67,7 @@ tare_entity: button.lunar_tare
 
 - `npm test` runs the logic tests (Node 20+, no dependencies).
 - `python3 -m http.server` serves the dev harness at `/dev/index.html`. Query params: `scale=1`, `weight=118`, `t=52`, `status=running|paused|armed|done`, `theme=dark`, `shots=1` (freezes the clock).
+
+## License
+
+[MIT](LICENSE)
