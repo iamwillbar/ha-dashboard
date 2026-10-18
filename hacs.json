@@ -1,5 +1,5 @@
 {
-  "name": "Pourover Card",
-  "filename": "pourover-card.js",
+  "name": "HA Dashboard Cards",
+  "filename": "ha-dashboard.js",
   "render_readme": true
 }

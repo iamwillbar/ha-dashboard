@@ -7,7 +7,7 @@ import {
   formatTime,
   shouldAutoStart,
   spiralPath,
-} from "../pourover-card.js";
+} from "../dist/pourover-card.js";
 
 const at = (elapsed, weight = null, status = "running") =>
   computePhase({ status, elapsed, weight, pours });
