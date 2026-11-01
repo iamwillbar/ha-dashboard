@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radial Menu Card Harness</title>
+<style>
+  :root {
+    --primary-text-color:#212121; --secondary-text-color:#727272; --card-background-color:#fff; --page:#f2efe9;
+    --primary-color:#03a9f4; --accent-color:#ff9800; --amber-color:#ffc107; --red-color:#f44336;
+    --green-color:#4caf50; --indigo-color:#3f51b5; --teal-color:#009688; --purple-color:#9c27b0; --grey-color:#9e9e9e;
+  }
+  :root[data-theme="dark"] { --primary-text-color:#e1e1e1; --secondary-text-color:#9b9b9b; --card-background-color:#1c1c1c; --page:#111; }
+  body { margin:0; padding:24px 16px; min-height:100vh; box-sizing:border-box; background:var(--page); color:var(--primary-text-color); font-family:Roboto, system-ui, sans-serif; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; max-width:640px; margin:0 auto; }
+  .fake { background:var(--card-background-color); border-radius:12px; min-height:64px; padding:12px; font-size:13px; color:var(--secondary-text-color); box-sizing:border-box; }
+  .slot { display:flex; align-items:center; justify-content:center; }
+  pre { max-width:640px; margin:24px auto 0; font-size:12px; white-space:pre-wrap; color:var(--secondary-text-color); }
+  pre[hidden] { display:none; }
+</style>
+</head>
+<body>
+<div class="grid" id="grid">
+  <div class="fake">Living room lights</div>
+  <div class="fake">Thermostat</div>
+  <div class="fake">Front door</div>
+  <div class="fake">Media</div>
+  <div class="fake">Energy</div>
+  <div class="slot"><radial-menu-card id="card"></radial-menu-card></div>
+  <div class="fake">Scenes</div>
+  <div class="fake">Weather</div>
+</div>
+<pre id="log"></pre>
+<script type="module">
+  // Load through the bundle entry, the same path HACS uses.
+  import "./ha-stubs.js";
+  import "../dist/ha-dashboard.js";
+  await customElements.whenDefined("radial-menu-card");
+  // Query params: theme=dark position=fixed corner=bottom-left open=1 labels=1 n=4 spread=top radius=120 shots=1
+  const q = new URLSearchParams(location.search);
+  if (q.get("theme") === "dark") document.documentElement.dataset.theme = "dark";
+
+  const states = {
+    "light.kitchen": { entity_id: "light.kitchen", state: "on", attributes: { friendly_name: "Kitchen" } },
+    "switch.fan": { entity_id: "switch.fan", state: "off", attributes: { friendly_name: "Fan", icon: "mdi:fan" } },
+    "media_player.living": { entity_id: "media_player.living", state: "playing", attributes: {} },
+    "lock.front": { entity_id: "lock.front", state: "locked", attributes: {} },
+  };
+  const hass = () => ({ states: { ...states }, callService: (d, s, data) => log("callService", { d, s, data }) });
+
+  const all = [
+    { name: "Lights", entity: "light.kitchen", icon: "mdi:lightbulb-group", color: "amber", tap_action: { action: "toggle" } },
+    { name: "Fan", entity: "switch.fan", color: "teal", tap_action: { action: "toggle" } },
+    { name: "Music", entity: "media_player.living", icon: "mdi:music", color: "purple" },
+    { name: "Front door", entity: "lock.front", color: "red", tap_action: { action: "toggle" } },
+    { name: "Movie night", icon: "mdi:movie-open", color: "indigo", tap_action: { action: "perform-action", perform_action: "scene.turn_on", target: { entity_id: "scene.movie" } } },
+    { name: "Settings", icon: "mdi:cog", color: "grey", tap_action: { action: "navigate", navigation_path: "/config" } },
+  ];
+  const n = Number(q.get("n") ?? all.length);
+  const config = { buttons: all.slice(0, n) };
+  if (q.get("position")) config.position = q.get("position");
+  if (q.get("corner")) config.corner = q.get("corner");
+  if (q.get("labels") === "1") { config.show_labels = true; config.radius = 120; }
+  if (q.get("radius")) config.radius = Number(q.get("radius"));
+  if (q.get("spread")) {
+    const { SPREADS } = await import("../dist/radial-menu-card.js");
+    [config.start_angle, config.end_angle] = SPREADS[q.get("spread")];
+  }
+
+  const card = document.getElementById("card");
+  const out = document.getElementById("log");
+  const log = (what, detail) => {
+    out.textContent = `${what} ${JSON.stringify(detail)}\n` + out.textContent;
+  };
+  card.setConfig(config);
+  card.hass = hass();
+
+  document.addEventListener("hass-action", (ev) => {
+    const { config, action } = ev.detail;
+    log(`hass-action (${action})`, config);
+    // Pretend HA ran a toggle so active styling can be seen.
+    if (config.tap_action?.action === "toggle" && states[config.entity]) {
+      const st = states[config.entity];
+      const flip = { on: "off", off: "on", locked: "unlocked", unlocked: "locked" };
+      states[config.entity] = { ...st, state: flip[st.state] ?? st.state };
+      card.hass = hass();
+    }
+  });
+
+  if (q.get("shots") === "1") {
+    out.hidden = true;
+    document.getElementById("grid").style.marginTop = "120px"; // room for the ring
+  }
+  if (q.get("open") === "1") card._open();
+</script>
+</body>
+</html>

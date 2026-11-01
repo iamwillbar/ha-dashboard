@@ -5,6 +5,7 @@ Custom cards for Home Assistant dashboards. You install them once through HACS, 
 | Card | Type | What it does |
 |---|---|---|
 | [Pourover Card](docs/pourover-card/README.md) | `custom:pourover-card` | Guides a pourover brew pour by pour (Blue Bottle's four-pour method by default). Can use an Acaia scale for live weight. |
+| [Radial Menu Card](docs/radial-menu-card/README.md) | `custom:radial-menu-card` | A round button that fans out a ring of action buttons. Sits in the grid or floats at a screen corner. |
 
 ![Pourover Card mid-brew](docs/pourover-card/dark-pour2.png)
 

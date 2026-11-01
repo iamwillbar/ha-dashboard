@@ -6,7 +6,7 @@
  * busts the browser cache for every card, not just this entry file.
  */
 
-export const CARDS = ["pourover-card"];
+export const CARDS = ["pourover-card", "radial-menu-card"];
 
 const tag = new URL(import.meta.url).search;
 for (const card of CARDS) {
